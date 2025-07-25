@@ -1,0 +1,144 @@
+---
+title: "ML_output_fig"
+author: "Steph Blain"
+date: "2025-07-08"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+library(forcats)
+library(scico)
+
+theme_set(theme_classic())
+
+shap1<-read_csv("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/rf_shap_dependence_data_202507.csv")
+features1<-read_csv("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/rf_feature_importances_202507.csv")
+knn1<-read_csv("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/knn_imputed_full_dataset.csv")
+
+```
+
+```{r}
+renameFeatures1<-
+  data.frame(Feature=c("release_year","fall_detectDay1","aims_heterozygosity",
+                     "bodyCondition","sex_binary","fall_bearing1","kipps",
+                     "tail.length","distal","releaseDay","wing.cord","p10",
+                     "aims_ancestry","tarsus.length"),
+           FeatureRenamed=c("Release year","Fall timing","Heterozygosity",
+                     "Body condition","Sex","Fall orientation","Kipps (wing)",
+                     "Tail length","Distal (wing)","Release day","Wing cord","p10 (feather)",
+                     "Ancestry","Tarsus length"),
+           FeatureCategory=c("Other","Behaviour","Genetics",
+                     "Morphology","Other","Behaviour","Morphology",
+                     "Morphology","Morphology","Behaviour","Morphology","Morphology",
+                     "Genetics","Morphology"))
+
+features1<-features1%>%select(-Category)%>%left_join(renameFeatures1)
+
+#get expected row count for remodeled df
+ncol(shap1)/2*nrow(shap1)
+
+shap1<-shap1%>%
+  pivot_longer(!starts_with("SHAP"),names_to="Feature",values_to="FeatureValue")%>%
+  pivot_longer(starts_with("SHAP"),names_to="Feature2",values_to="SHAPValue")%>%
+  mutate(Feature2=gsub("SHAP_","",Feature2))%>%
+  filter(Feature==Feature2)%>%
+  left_join(renameFeatures1)
+
+nrow(shap1)
+```
+
+* verify that features importances sum to 1 and all features are unique
+* extract traits with a feature importance greater than expected
+
+```{r}
+
+round(sum(features1$Importance),6)==1
+unique(features1$Feature)==features1$Feature
+nullImportance=1/nrow(features1)
+
+topFeatures<-features1%>%
+  filter(Importance>nullImportance&
+           Feature!="release_year")%>%
+  pull(FeatureRenamed)
+
+```
+
+```{r}
+
+
+gg1<-ggplot(features1,
+       aes(x=Importance,
+           y=fct_reorder(FeatureRenamed,Importance),
+           fill=FeatureCategory))+
+  geom_bar(stat='identity')+
+  geom_vline(xintercept=nullImportance,linetype=2)+
+  scale_fill_manual(values=scico(4,palette='devon',categorical=F,end=0.88),
+                    name='')+
+  ylab('Trait')+xlab('Feature importance')+
+  theme(legend.position = c(.8, .3))
+
+gg1
+```
+```{r}
+ #68 true negatives, 15 false positives, 19 false negatives, and 18 true positives
+
+confusion1<-data.frame(TrueLabel=factor(c("Survived","Survived","Not survived","Not survived"),
+                                        levels=c("Survived","Not survived")),
+           PredictedLabel=factor(c("Survived","Not survived","Survived","Not survived"),
+                                        levels=c("Not survived","Survived")),
+           Count=c(18,19,15,68))
+
+gg3<-ggplot(confusion1,aes(y=TrueLabel,x=PredictedLabel,fill=Count))+
+  geom_tile()+
+  geom_text(aes(label=Count))+
+  scale_fill_scico(palette='devon',end=0.9,begin=0.5,guide='none',direction=-1)+
+  coord_equal()+
+  xlab("Predicted")+ylab("True")
+gg3
+
+```
+
+```{r}
+shap1topFeatures<-shap1%>%
+  filter(FeatureRenamed%in%topFeatures)%>%
+  mutate(FeatureRenamed=factor(FeatureRenamed,levels=topFeatures))
+
+gg2<-ggplot(shap1topFeatures,
+       aes(x=FeatureValue,y=SHAPValue,colour=FeatureCategory))+
+  geom_hline(yintercept=0,linetype=2)+
+  geom_point(alpha=0.8)+
+  facet_grid(cols=vars(FeatureRenamed),scales='free')+
+  scale_colour_manual(values=scico(4,palette='devon',categorical=F,end=0.88),
+                      guide='none')+
+  ylab('SHAP value')+xlab('Trait value')
+
+gg2
+```
+
+* SHAP sample size
+
+```{r}
+
+nrow(shap1)/length(unique(shap1$Feature))
+
+```
+
+```{r, fig.width=10,fig.height=8}
+
+gg4=ggpubr::ggarrange(ggpubr::ggarrange(gg3,gg1,nrow=1,ncol=2,widths=c(0.7,1),labels=c("A","B")),
+                      gg2,nrow=2,labels=c("","C"),heights=c(1,0.7))
+gg4
+#ggsave("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/Fig2.pdf",
+#       plot=gg4,
+#       height = 8,width=10,bg='white')
+
+
+```
