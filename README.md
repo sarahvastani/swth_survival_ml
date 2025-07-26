@@ -14,7 +14,7 @@
 
 ### 04_ml_workflow_survival_prediction.ipynb
 
-* Execute machine learning pipeline to predict Swainson’s thrush migratory survival with Random Forests, including preprocessing, SMOTE balancing, hyperparameter tuning, and SHAP interpretation
+* Execute machine learning pipeline to predict Swainson’s thrush migratory survival with Random Forest, including preprocessing, SMOTE balancing, hyperparameter tuning, and SHAP interpretation
 
 ### fig1_map_format.R
 
