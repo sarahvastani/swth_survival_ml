@@ -31,3 +31,8 @@
 
 * Make Fig 2
 * Model evaluation fig - confusion matrix, SHAP values, feature importances
+
+### figS1c_S2_tables_drawings.pdf
+
+* Make Fig S1c and S2
+* Visualize SMOTE resampling and KNN imputation using tables and drawings
