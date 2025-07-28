@@ -36,3 +36,6 @@
 
 * Make Fig S1c and S2
 * Visualize SMOTE resampling and KNN imputation using tables and drawings
+
+### figS5_Workflow.pdf
+* Visually summarize the machine learning pipeline to predict Swainson’s thrush migratory survival
