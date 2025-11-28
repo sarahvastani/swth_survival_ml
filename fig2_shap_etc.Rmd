@@ -16,12 +16,18 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(forcats)
 library(scico)
+library(cowplot)
+library(ggpubr)
+library(circlize)
+library(geosphere)
+
 
 theme_set(theme_classic())
 
 shap1<-read_csv("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/rf_shap_dependence_data_202507.csv")
 features1<-read_csv("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/rf_feature_importances_202507.csv")
 knn1<-read_csv("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/knn_imputed_full_dataset.csv")
+interactions1<-read_csv("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/rf_important_pairwise_interactions_202507.csv")
 
 ```
 
@@ -99,7 +105,7 @@ confusion1<-data.frame(TrueLabel=factor(c("Survived","Survived","Not survived","
 gg3<-ggplot(confusion1,aes(y=TrueLabel,x=PredictedLabel,fill=Count))+
   geom_tile()+
   geom_text(aes(label=Count))+
-  scale_fill_scico(palette='devon',end=0.9,begin=0.5,guide='none',direction=-1)+
+  scale_fill_scico(palette='davos',end=0.5,begin=0.2,guide='none',direction=-1)+
   coord_equal()+
   xlab("Predicted")+ylab("True")
 gg3
@@ -131,14 +137,182 @@ nrow(shap1)/length(unique(shap1$Feature))
 
 ```
 
-```{r, fig.width=10,fig.height=8}
+```{r}
 
-gg4=ggpubr::ggarrange(ggpubr::ggarrange(gg3,gg1,nrow=1,ncol=2,widths=c(0.7,1),labels=c("A","B")),
-                      gg2,nrow=2,labels=c("","C"),heights=c(1,0.7))
+interactions1<-read_csv("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/rf_important_pairwise_interactions_202507.csv")
+
+
+renameFeatures1<-
+  data.frame(Feature=c("release_year","fall_detectDay1","aims_heterozygosity",
+                       "bodyCondition","sex_binary","fall_bearing1","kipps",
+                       "tail.length","distal","releaseDay","wing.cord","p10",
+                       "aims_ancestry","tarsus.length"),
+             FeatureRenamed=c("Release year","Timing","Heterozygosity",
+                              "Body condition","Sex","Orientation","Kipps",
+                              "Tail","Distal","Release\nday","Wing\ncord","p10",
+                              "Ancestry","Tarsus"),
+             FeatureCategory=c("Other","Behaviour","Genetics",
+                               "Morphology","Other","Behaviour","Morphology",
+                               "Morphology","Morphology","Behaviour","Morphology","Morphology",
+                               "Genetics","Morphology"))
+
+interactions1<-interactions1%>%
+  rename(Feature1="Feature 1",Feature2="Feature 2",DeltaF1="Delta F1")%>%
+  left_join(renameFeatures1%>%
+              mutate(Feature1=Feature,Feature1Renamed=FeatureRenamed)%>%
+              select(Feature1,Feature1Renamed))%>%
+  left_join(renameFeatures1%>%
+              mutate(Feature2=Feature,Feature2Renamed=FeatureRenamed)%>%
+              select(Feature2,Feature2Renamed))%>%
+  select(Feature1Renamed,Feature2Renamed,DeltaF1)
+
+FeatureColours=scico(14,palette='devon',categorical=F,end=0.92)
+names(FeatureColours)<-unique(c(interactions1$Feature1Renamed,
+                                interactions1$Feature2Renamed))
+
+
+chordDiagram(interactions1%>%filter(DeltaF1>0.1),
+             grid.col=FeatureColours)
+
+
+
+
+chord1<-chordDiagram(interactions1%>%filter(DeltaF1>0.1),
+                     grid.col=FeatureColours)
+
+png("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/chord1.png",res=300,
+    width=5,height=4,units='in')
+
+chordDiagram(interactions1%>%filter(DeltaF1>0.1),
+             grid.col=FeatureColours)
+dev.off()
+
+
+```
+
+
+```{r}
+
+chord2<-ggdraw() +
+  draw_image("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/chord1.png")
+
+chord2
+```
+```{r}
+
+library(sf)
+library(rnaturalearth)
+
+meta1<-read.csv("C:/Users/Steph/GitHub_data/AIMs_metaData/AIMs_metadata.20250327.csv")
+lat.df<-read.csv("C:/Users/Steph/GitHub_data/survivalData/motusDetections.filtered.20250409.csv")
+data1<-read.csv("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/Dataset1.phiSurvival.20250707.csv")
+
+
+#load map data
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+map1<-ggplot() +
+  geom_sf(data = world,fill="grey90",colour=NA)+
+  xlab("Longitude")+ylab("Latitude")+
+  #theme(legend.position="none")+
+  ylim(0,66)+xlim(-140,-55)
+map1
+
+```
+
+```{r}
+
+projection<-"+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
+
+lat.df.birds.fall1<-lat.df%>%
+  filter(name_in_vcf%in%data1$name_in_vcf)%>%
+  mutate(deployyear=as.numeric(substr(tagDeployStart,1,4)))%>%
+  filter(detectyear==deployyear)%>%
+  filter(detectdoy>212&tagProjID==280)%>%
+  mutate(deployDay=substr(tagDeployStart,1,10),tsDay=substr(ts,1,10))%>%
+  mutate(tagDays=as.integer(gsub(" days"," ",difftime(tsDay,deployDay,units="days"))))%>%
+  select(motustagid,tsDay,tagDeployStart,tagDepLat,tagDepLon,
+         recvDeployID,recvDeployLat,recvDeployLon,recvDeployName,
+         detectyear,tagDays,detectdoy,deployDay,
+         deployyear)%>%
+  mutate(tagDeployStart=substr(tagDeployStart,1,10))%>%
+  distinct%>%arrange(tagDays)%>%
+  filter(!is.na(tagDays))%>%
+  filter(motustagid!=85685)%>% #broken tag
+  mutate(tagDepLat=if_else(motustagid%in%c(91383,85681),50.133366,tagDepLat),
+         tagDepLon=if_else(motustagid%in%c(91383,85681),-122.95036,tagDepLon))
+
+#estimate the distance between release site and detection site
+#estimation needs to be pairwise, otherwise function will generate a matrix of all possible combos
+lat.df.birds.fall1$releaseSiteDistance<-NA
+for(i in 1:nrow(lat.df.birds.fall1)){
+  lat.df.birds.fall1$releaseSiteDistance[i]<-
+    distm(lat.df.birds.fall1[i,c("tagDepLon","tagDepLat")],
+          lat.df.birds.fall1[i,c("recvDeployLon","recvDeployLat")],
+          fun = distHaversine)
+}
+
+library(geosphere)
+
+lat.df.birds.fall2<-lat.df.birds.fall1%>%
+  filter(releaseSiteDistance<300000)%>%
+    #keep the first record within the tier for each bird
+    arrange(tagDays)%>%filter(!duplicated(motustagid))%>%
+  mutate(motustagid=as.character(motustagid))%>%
+  left_join(data1%>%
+              mutate(motustagid=as.character(motustagid))%>%
+              select(name_in_vcf,motustagid,aims_ancestry,aims_heterozygosity,phi_binary,fall_bearing1))
+lat.df.birds.fall1
+
+lat.df.birds.fall2<-lat.df.birds.fall2%>%
+  dplyr::select(aims_ancestry,name_in_vcf,recvDeployLat,tagDepLat,fall_bearing1)%>%
+  pivot_longer(c(tagDepLat,recvDeployLat),names_to='detect_type',values_to='latitude')%>%
+  mutate(detect_type=gsub('Lat','',detect_type))%>%
+  left_join(
+    lat.df.birds.fall2%>%
+      dplyr::select(name_in_vcf,recvDeployLon,tagDepLon)%>%
+      pivot_longer(c(tagDepLon,recvDeployLon),names_to='detect_type',values_to='longitude')%>%
+      mutate(detect_type=gsub('Lon','',detect_type)))
+
+```
+
+```{r,fig.width=12,fig.height=4}
+
+mapOrient<-ggplot() +
+  geom_sf(data = world,fill="grey95",colour='grey70')+
+  geom_path(data=lat.df.birds.fall2,aes(x=longitude,y=latitude,
+                                  group=name_in_vcf,colour=fall_bearing1),size=0.6,alpha=0.5)+
+  #scale_colour_manual(values=natparks.pals("Banff")[c(4,1)])+
+  geom_point(data=lat.df.birds.fall2,aes(x=longitude,y=latitude,
+                                colour=fall_bearing1,group=name_in_vcf),size=1.5)+
+  #scale_shape_manual(values=c(19,15,17))+
+  
+  scale_colour_gradientn(colours=scico(4,palette='davos',categorical=F,end=0.7,direction=-1),
+                         name="Fall\norientation",values=c(0,0.25,0.75,1))+
+  xlab("Longitude")+ylab("Latitude")+
+  #theme(legend.position="none")+
+  ylim(48,52)+xlim(-125,-118)
+
+mapOrient
+```
+
+
+```{r, fig.width=10,fig.height=12}
+
+gg4=ggarrange(ggarrange(gg3,gg1,nrow=1,ncol=2,widths=c(0.7,1),labels=c("A","B")),
+                      gg2,
+              ggarrange(mapOrient,chord2,ncol=2,labels=c("D","E")),
+              nrow=3,labels=c("","C"),heights=c(1,0.7,1))
 gg4
+
 #ggsave("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/Fig2.pdf",
 #       plot=gg4,
-#       height = 8,width=10,bg='white')
+#       height = 12,width=10,bg='white')
+
+ggsave("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/Fig2.png",
+       plot=gg4,
+       height = 12,width=10,bg='white')
+
 
 
 ```
