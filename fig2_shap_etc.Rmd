@@ -24,14 +24,15 @@ library(geosphere)
 
 theme_set(theme_classic())
 
-shap1<-read_csv("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/rf_shap_dependence_data_202507.csv")
-features1<-read_csv("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/rf_feature_importances_202507.csv")
+shap1raw<-read_csv("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/rf_shap_dependence_data_202507.csv")
+features1<-read_csv("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/univariate_permutation_with_quantiles.csv")
 knn1<-read_csv("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/knn_imputed_full_dataset.csv")
-interactions1<-read_csv("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/rf_important_pairwise_interactions_202507.csv")
+interactions1<-read_csv("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/pairwise_permutation_with_quantiles.csv")
 
 ```
 
 ```{r}
+
 renameFeatures1<-
   data.frame(Feature=c("release_year","fall_detectDay1","aims_heterozygosity",
                      "bodyCondition","sex_binary","fall_bearing1","kipps",
@@ -46,33 +47,36 @@ renameFeatures1<-
                      "Morphology","Morphology","Behaviour","Morphology","Morphology",
                      "Genetics","Morphology"))
 
-features1<-features1%>%select(-Category)%>%left_join(renameFeatures1)
+features1<-features1%>%left_join(renameFeatures1)
 
 #get expected row count for remodeled df
-ncol(shap1)/2*nrow(shap1)
+ncol(shap1raw)/2*nrow(shap1raw)
 
-shap1<-shap1%>%
-  pivot_longer(!starts_with("SHAP"),names_to="Feature",values_to="FeatureValue")%>%
+shap1rows<-shap1raw%>%
+  mutate(rowID=paste("row",1:nrow(shap1raw)))
+
+shap1<-shap1rows%>%
+  pivot_longer(!(starts_with("SHAP")|starts_with("rowID")),names_to="Feature",values_to="FeatureValue")%>%
   pivot_longer(starts_with("SHAP"),names_to="Feature2",values_to="SHAPValue")%>%
   mutate(Feature2=gsub("SHAP_","",Feature2))%>%
   filter(Feature==Feature2)%>%
   left_join(renameFeatures1)
-
+shap1
 nrow(shap1)
 ```
 
-* verify that features importances sum to 1 and all features are unique
+* verify that all features are unique & mean falls within quantiles
 * extract traits with a feature importance greater than expected
 
 ```{r}
 
-round(sum(features1$Importance),6)==1
-unique(features1$Feature)==features1$Feature
-nullImportance=1/nrow(features1)
+all(unique(features1$Feature)==features1$Feature)
+
+all(features1$Mean_Delta_F1>features1$Q2.5&
+      features1$Mean_Delta_F1<features1$Q97.5)
 
 topFeatures<-features1%>%
-  filter(Importance>nullImportance&
-           Feature!="release_year")%>%
+  filter(Q2.5>0&Feature!="release_year")%>%
   pull(FeatureRenamed)
 
 ```
@@ -81,14 +85,16 @@ topFeatures<-features1%>%
 
 
 gg1<-ggplot(features1,
-       aes(x=Importance,
-           y=fct_reorder(FeatureRenamed,Importance),
-           fill=FeatureCategory))+
-  geom_bar(stat='identity')+
-  geom_vline(xintercept=nullImportance,linetype=2)+
-  scale_fill_manual(values=scico(4,palette='devon',categorical=F,end=0.88),
+       aes(x=Mean_Delta_F1,
+           y=fct_reorder(FeatureRenamed,Mean_Delta_F1),
+           colour=FeatureCategory))+
+  #geom_bar(stat='identity')+
+  geom_vline(xintercept=0,linetype=2)+
+  geom_point(size=4)+
+  geom_errorbar(aes(xmin=Q2.5,xmax=Q97.5),width=0.4,size=1.2)+
+  scale_colour_manual(values=scico(4,palette='devon',categorical=F,end=0.8),
                     name='')+
-  ylab('Trait')+xlab('Feature importance')+
+  ylab('Trait')+xlab("\u0394 F1")+
   theme(legend.position = c(.8, .3))
 
 gg1
@@ -114,16 +120,19 @@ gg3
 
 ```{r}
 shap1topFeatures<-shap1%>%
-  filter(FeatureRenamed%in%topFeatures)%>%
-  mutate(FeatureRenamed=factor(FeatureRenamed,levels=topFeatures))
+  filter(FeatureRenamed%in%topFeatures[1:8])%>%
+  mutate(FeatureRenamed=factor(FeatureRenamed,levels=topFeatures))%>%
+  left_join(shap1rows%>%select(rowID,aims_ancestry))
+
 
 gg2<-ggplot(shap1topFeatures,
-       aes(x=FeatureValue,y=SHAPValue,colour=FeatureCategory))+
+       aes(x=FeatureValue,y=SHAPValue,colour=aims_ancestry))+
   geom_hline(yintercept=0,linetype=2)+
   geom_point(alpha=0.8)+
-  facet_grid(cols=vars(FeatureRenamed),scales='free')+
-  scale_colour_manual(values=scico(4,palette='devon',categorical=F,end=0.88),
-                      guide='none')+
+  facet_wrap(vars(FeatureRenamed),scales='free_x',nrow=2)+
+  #scale_colour_manual(values=scico(4,palette='devon',categorical=F,end=0.88),
+  #                    guide='none')+
+  scale_colour_scico(palette='devon',end=0.7,guide='none',direction=-1)+
   ylab('SHAP value')+xlab('Trait value')
 
 gg2
@@ -138,8 +147,6 @@ nrow(shap1)/length(unique(shap1$Feature))
 ```
 
 ```{r}
-
-interactions1<-read_csv("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/rf_important_pairwise_interactions_202507.csv")
 
 
 renameFeatures1<-
@@ -156,35 +163,36 @@ renameFeatures1<-
                                "Morphology","Morphology","Behaviour","Morphology","Morphology",
                                "Genetics","Morphology"))
 
-interactions1<-interactions1%>%
-  rename(Feature1="Feature 1",Feature2="Feature 2",DeltaF1="Delta F1")%>%
+interactions2<-interactions1%>%
+  filter(Q2.5>0)%>%
   left_join(renameFeatures1%>%
               mutate(Feature1=Feature,Feature1Renamed=FeatureRenamed)%>%
               select(Feature1,Feature1Renamed))%>%
   left_join(renameFeatures1%>%
               mutate(Feature2=Feature,Feature2Renamed=FeatureRenamed)%>%
               select(Feature2,Feature2Renamed))%>%
-  select(Feature1Renamed,Feature2Renamed,DeltaF1)
+  select(Feature1Renamed,Feature2Renamed,Mean_Delta_F1)%>%
+  arrange(-Mean_Delta_F1)
 
 FeatureColours=scico(14,palette='devon',categorical=F,end=0.92)
 names(FeatureColours)<-unique(c(interactions1$Feature1Renamed,
                                 interactions1$Feature2Renamed))
 
 
-chordDiagram(interactions1%>%filter(DeltaF1>0.1),
-             grid.col=FeatureColours)
 
 
 
 
-chord1<-chordDiagram(interactions1%>%filter(DeltaF1>0.1),
+
+chord1<-chordDiagram(interactions2,
                      grid.col=FeatureColours)
 
 png("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/chord1.png",res=300,
     width=5,height=4,units='in')
 
-chordDiagram(interactions1%>%filter(DeltaF1>0.1),
+chordDiagram(interactions2,
              grid.col=FeatureColours)
+
 dev.off()
 
 
@@ -203,8 +211,8 @@ chord2
 library(sf)
 library(rnaturalearth)
 
-meta1<-read.csv("C:/Users/Steph/GitHub_data/AIMs_metaData/AIMs_metadata.20250327.csv")
-lat.df<-read.csv("C:/Users/Steph/GitHub_data/survivalData/motusDetections.filtered.20250409.csv")
+meta1<-read.csv("~/GitHub_data/AIMs_metaData/AIMs_metadata.20250327.csv")
+lat.df<-read.csv("~/GitHub_data/survivalData/motusDetections.filtered.20250409.csv")
 data1<-read.csv("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/Dataset1.phiSurvival.20250707.csv")
 
 
@@ -214,9 +222,26 @@ world <- ne_countries(scale = "medium", returnclass = "sf")
 map1<-ggplot() +
   geom_sf(data = world,fill="grey90",colour=NA)+
   xlab("Longitude")+ylab("Latitude")+
+  theme(panel.background = element_rect(fill='white'))+
   #theme(legend.position="none")+
-  ylim(0,66)+xlim(-140,-55)
+  ylim(18,66)+xlim(-140,-55)
 map1
+
+```
+
+* verify that orientation x ancestry x heterozygosity produces a unique combination per individual
+* if yes, can be used for joining
+
+```{r}
+
+shap1raw%>%group_by(fall_bearing1,aims_ancestry,aims_heterozygosity)%>%
+  summarise(count=n())%>%filter(count>1)%>%nrow()==0
+
+bearingShap1<-data1%>%
+  select(reference,name_in_vcf,fall_bearing1,aims_ancestry,aims_heterozygosity)%>%
+  left_join(shap1raw%>%
+              select(fall_bearing1,aims_ancestry,aims_heterozygosity,SHAP_fall_bearing1))%>%
+  filter(!is.na(SHAP_fall_bearing1))
 
 ```
 
@@ -274,9 +299,15 @@ lat.df.birds.fall2<-lat.df.birds.fall2%>%
       pivot_longer(c(tagDepLon,recvDeployLon),names_to='detect_type',values_to='longitude')%>%
       mutate(detect_type=gsub('Lon','',detect_type)))
 
+lat.df.birds.fall2<-lat.df.birds.fall2%>%
+  left_join(bearingShap1%>%select(name_in_vcf,SHAP_fall_bearing1))%>%
+  filter(!is.na(SHAP_fall_bearing1))
+
+#write_csv(lat.df.birds.fall2,"C:/Users/Steph/TAMU_OneDrive/Thrushes/migratory_traits/fig2d_data.csv")
+
 ```
 
-```{r,fig.width=12,fig.height=4}
+```{r,fig.width=5,fig.height=6}
 
 mapOrient<-ggplot() +
   geom_sf(data = world,fill="grey95",colour='grey70')+
@@ -292,25 +323,46 @@ mapOrient<-ggplot() +
   xlab("Longitude")+ylab("Latitude")+
   #theme(legend.position="none")+
   ylim(48,52)+xlim(-125,-118)
+mapOrientMain<-ggplot() +
+  geom_sf(data = world,fill="grey99",colour='grey70')+
+  geom_path(data=lat.df.birds.fall2,aes(x=longitude,y=latitude,
+                                  group=name_in_vcf,colour=SHAP_fall_bearing1),size=0.6,alpha=0.7)+
+  #scale_colour_manual(values=natparks.pals("Banff")[c(4,1)])+
+  geom_point(data=lat.df.birds.fall2,aes(x=longitude,y=latitude,
+                                colour=SHAP_fall_bearing1,group=name_in_vcf),size=1.5,alpha=0.7)+
+  #scale_shape_manual(values=c(19,15,17))+
+  
+  scale_colour_gradientn(colours=scico(4,palette='davos',categorical=F,end=0.9,direction=-1),
+                         name="SHAP\nvalue",values=c(0,0.25,0.75,1))+
+  xlab("Longitude")+ylab("Latitude")+
+  #theme(legend.position="none")+
+  ylim(48,52)+xlim(-125,-118)
 
-mapOrient
+insetMap1<-map1+theme_void()+
+  geom_rect(aes(xmin=-125,xmax=-118,ymin=48,ymax=52),fill='grey30')+
+  theme(panel.border = element_rect(colour = "grey30",fill=NA))
+
+mapOrient<-ggdraw()+
+  draw_plot(mapOrientMain)+
+  draw_plot(insetMap1, x = 0.57, y = 0.71, width = 0.25, height=0.25)
+
 ```
 
 
-```{r, fig.width=10,fig.height=12}
+```{r, fig.width=10,fig.height=15}
 
 gg4=ggarrange(ggarrange(gg3,gg1,nrow=1,ncol=2,widths=c(0.7,1),labels=c("A","B")),
                       gg2,
               ggarrange(mapOrient,chord2,ncol=2,labels=c("D","E")),
-              nrow=3,labels=c("","C"),heights=c(1,0.7,1))
+              nrow=3,labels=c("","C"),heights=c(1,1.2,1))
 gg4
 
-#ggsave("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/Fig2.pdf",
-#       plot=gg4,
-#       height = 12,width=10,bg='white')
+ggsave("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/Fig2.pdf",
+     plot=gg4,
+     height = 12,width=10,bg='white')
 
 ggsave("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/Fig2.png",
-       plot=gg4,
+       plot=gg4,dpi=1000,
        height = 12,width=10,bg='white')
 
 

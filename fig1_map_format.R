@@ -6,16 +6,18 @@ library(qgraph)
 library(cowplot)
 theme_set(theme_classic())
 
-meta1<-read.csv("C:/Users/Steph/GitHub_data/AIMs_metaData/AIMs_metadata.20250327.csv")
-lat.df<-read.csv("C:/Users/Steph/GitHub_data/survivalData/motusDetections.filtered.20250409.csv")
+meta1<-read.csv("~/GitHub_data/AIMs_metaData/AIMs_metadata.20250327.csv")
+lat.df<-read.csv("~/GitHub_data/survivalData/motusDetections.filtered.20250409.csv")
+receivers<-read.csv("~/GitHub_data/survivalData/receiver_database_dec25.csv")
 data1<-read.csv("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/Dataset1.phiSurvival.20250707.csv")
-lat.df$ts
+
 lat.df.map<-lat.df%>%filter(name_in_vcf%in%data1$name_in_vcf)%>%
   mutate(detectDate=substr(ts,1,10))%>%
-  dplyr::select(recvDeployName,recvDeployLat,recvDeployLon,detectdoy,detectyear,detectDate,name_in_vcf)%>%
+  dplyr::select(recvDeployName,recvDeployLat,recvDeployLon,detectdoy,detectyear,
+                detectDate,name_in_vcf,aims_ancestry)%>%
   arrange(detectDate)%>%
   unique()
-
+lat.df.map$aims_ancestry
 meta1Release<-meta1%>%
   filter(name_in_vcf%in%data1$name_in_vcf)%>%
   mutate(recvDeployName="releaseSitePemberton")%>%
@@ -27,28 +29,49 @@ meta1Release<-meta1%>%
 lat.df.map2<-rbind(lat.df.map,meta1Release)%>%
   arrange(detectDate)
 
+releaseSite<-meta1Release%>%
+  summarise(meanLat=mean(recvDeployLat),meanLon=mean(recvDeployLon))
+
+data1%>%
+  mutate(ancestryGroup=case_when(aims_ancestry<=0.1~"inland",
+                                 aims_ancestry>=0.9~"coastal",
+                                 aims_ancestry>0.1&aims_ancestry<0.5~"hybrid_inland",
+                                 aims_ancestry>=0.5&aims_ancestry<0.9~"hybrid_coastal"))%>%
+  group_by(ancestryGroup)%>%summarise(count=n())
+
+data1%>%
+  mutate(ancestryGroup=case_when(aims_ancestry<=0.1~"inland",
+                                 aims_ancestry>=0.9~"coastal",
+                                 aims_ancestry>0.1&aims_ancestry<0.5~"hybrid_inland",
+                                 aims_ancestry>=0.5&aims_ancestry<0.9~"hybrid_coastal"))%>%
+  group_by(ancestryGroup,phi_binary)%>%summarise(count=n())%>%
+  ungroup()%>%group_by(ancestryGroup)%>%mutate(percent=count/sum(count))%>%
+  filter(phi_binary==1)
+
+
 #load map data
 world <- ne_countries(scale = "medium", returnclass = "sf")
 
+receivers<-receivers%>%
+  filter(timeStart<as.Date("2025-12-31")&timeEnd>("2019-01-01"))
+
 map1<-ggplot() +
-  geom_sf(data = world,fill="grey90",colour=NA)+
+  geom_sf(data = world,fill="grey95",colour='grey80')+
+  geom_point(data=receivers,aes(x=longitude,y=latitude),
+             size=0.5,colour='grey60',shape=1)+
+  geom_point(data=lat.df.map,aes(x=recvDeployLon,y=recvDeployLat,
+                                 group=name_in_vcf,colour=aims_ancestry),
+             size=1.2,alpha=0.5)+
   geom_path(data=lat.df.map,aes(x=recvDeployLon,y=recvDeployLat,
-                                  group=name_in_vcf),
-            size=0.1,alpha=0.2,
-            colour=scico(4,palette='devon',categorical=F,end=0.92)[1])+
-  #scale_colour_manual(values=natparks.pals("Banff")[c(4,1)])+
-  geom_point(data=lat.df.map,aes(x=recvDeployLon,y=recvDeployLat,group=name_in_vcf),
-             size=1.2,alpha=0.5,
-             colour=scico(4,palette='devon',categorical=F,end=0.92)[1])+
+                                  group=name_in_vcf,colour=aims_ancestry),
+            size=0.1,alpha=0.5)+
+  geom_point(data=releaseSite,aes(x=meanLon,y=meanLat),colour="grey10",size=2,shape=8)+
+  scale_colour_scico(palette="devon",end=0.7,direction=-1,name="Ancestry")+
   xlab("Longitude")+ylab("Latitude")+
   #theme(legend.position="none")+
-  ylim(0,66)+xlim(-140,-55)
-
-
+  ylim(0,66)+xlim(-140,-55)+
+  theme(legend.position=c(0.92,0.8),legend.background=element_rect(fill="white"))
 map1
-
-
-
 pheno.nodes<-read_csv("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/phenoNetworkCorr.csv")%>%
   column_to_rownames("Feature")%>%
   as.matrix()
@@ -99,4 +122,7 @@ gg1
 
 ggsave("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/Fig1.pdf",
        plot=gg1,
+       height = 4,width=10,bg='white')
+ggsave("C:/Users/Steph/GitHub/thrush_hybrids/migratory_traits/Fig1.png",
+       plot=gg1,dpi=1000,
        height = 4,width=10,bg='white')
